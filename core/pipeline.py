@@ -16,6 +16,8 @@
 from __future__ import annotations
 
 import os
+import logging
+import traceback
 import uuid
 from dataclasses import dataclass, field
 
@@ -365,7 +367,9 @@ class WritingPipeline:
                 if dialogue_review.overall_score < self.config.review_score_floor:
                     log(f"  ⚠ 对话质量偏低，问题将汇入修订循环")
             except Exception as e:
-                log(f"  对话审查失败（不阻塞）：{e}")
+                log(f"  对话审查失败（不阻塞）：{type(e).__name__}: {e}")
+                if not isinstance(e, (json.JSONDecodeError, KeyError, ValueError)):
+                    log(f"  详细错误：{traceback.format_exc()[-500:]}")
 
         # ── 3. 写后验证（零 LLM） ────────────────────────────────────────────
         log("写后验证...")
@@ -428,7 +432,9 @@ class WritingPipeline:
                 )
                 log(f"  场景评分：{scene_audit.overall_score}/100")
             except Exception as e:
-                log(f"  场景审核失败（不阻塞）：{e}")
+                log(f"  场景审核失败（不阻塞）：{type(e).__name__}: {e}")
+                if not isinstance(e, (json.JSONDecodeError, KeyError, ValueError)):
+                    log(f"  详细错误：{traceback.format_exc()[-500:]}")
 
         if self.psychological_expert:
             log("心理审核...")
@@ -441,7 +447,9 @@ class WritingPipeline:
                 )
                 log(f"  心理评分：{psych_audit.overall_score}/100")
             except Exception as e:
-                log(f"  心理审核失败（不阻塞）：{e}")
+                log(f"  心理审核失败（不阻塞）：{type(e).__name__}: {e}")
+                if not isinstance(e, (json.JSONDecodeError, KeyError, ValueError)):
+                    log(f"  详细错误：{traceback.format_exc()[-500:]}")
 
         # ── 4. 审计 → 修订闭环（合并所有审查 Agent 的问题）────────────────────
         log("审计员审计...")
@@ -551,7 +559,9 @@ class WritingPipeline:
                             revise_result = self.reviser.revise(current_content, style_issues, mode="polish")
                             current_content = revise_result.content
             except Exception as e:
-                log(f"  风格检查失败（不阻塞）：{e}")
+                log(f"  风格检查失败（不阻塞）：{type(e).__name__}: {e}")
+                if not isinstance(e, (json.JSONDecodeError, KeyError, ValueError)):
+                    log(f"  详细错误：{traceback.format_exc()[-500:]}")
 
         # ── 5. 保存最终稿 ─────────────────────────────────────────────────────
         self.sm.save_final(ch, current_content)
@@ -593,7 +603,7 @@ class WritingPipeline:
             summary_md = self.summary_agent.format_for_truth_file(summary)
             self.sm.append_truth(TruthFileKey.CHAPTER_SUMMARIES, summary_md)
         except Exception as e:
-            # 摘要生成失败不阻塞
+            log(f"摘要生成失败：{type(e).__name__}: {e}")
             fallback = (
                 f"\n## 第 {ch} 章《{title}》\n"
                 f"{chapter_outline.summary}\n"
@@ -654,7 +664,7 @@ class WritingPipeline:
                 self.dashboard.save(dash_path)
                 log(f"仪表盘已保存：{dash_path}")
             except Exception as e:
-                log(f"仪表盘保存失败（不阻塞）：{e}")
+                log(f"仪表盘保存失败（不阻塞）：{type(e).__name__}: {e}")
 
         # ── 13. 更新动态规划器进度（V3 增强）─────────────────────────────────────
         if self.dynamic_planner:
@@ -688,7 +698,9 @@ class WritingPipeline:
                     planner_path = self.sm.book_dir / "dynamic_planner.json"
                     self.dynamic_planner.save(planner_path)
             except Exception as e:
-                log(f"动态规划器更新失败（不阻塞）：{e}")
+                log(f"动态规划器更新失败（不阻塞）：{type(e).__name__}: {e}")
+                if not isinstance(e, (OSError, IOError)):
+                    log(f"  详细错误：{traceback.format_exc()[-300:]}")
 
         # ── 14. 保存知识库查询统计（V4 新增）────────────────────────────────────
         if self.kb_tracker and self.kb_tracker.queries:
@@ -709,7 +721,7 @@ class WritingPipeline:
                 kb_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
                 log(f"KB查询：本章 {len(self.kb_tracker.queries)} 次")
             except Exception as e:
-                log(f"KB统计保存失败（不阻塞）：{e}")
+                log(f"KB统计保存失败（不阻塞）：{type(e).__name__}: {e}")
 
         # ── 15. V4：记录 Agent 能力画像 ──────────────────────────────────────
         self._record_agent_performance(
@@ -772,7 +784,7 @@ class WritingPipeline:
                     )
                     log(f"  报告已保存：{mirofish_path}")
             except Exception as e:
-                log(f"  MiroFish 测试失败（不阻塞）：{e}")
+                log(f"  MiroFish 测试失败（不阻塞）：{type(e).__name__}: {e}")
 
         return PipelineResult(
             chapter_number=ch,
@@ -824,8 +836,8 @@ class WritingPipeline:
 
             existing.append(record)
             perf_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass  # 画像记录失败不阻塞
+        except Exception as e:
+            logging.getLogger("pipeline").debug(f"Agent画像记录失败：{e}")
 
     # ── 多线程辅助方法 ────────────────────────────────────────────────────────
 
@@ -1022,8 +1034,8 @@ class WritingPipeline:
                         delta = int(m.group(1)) if m else 0
                         reason = re.sub(r'[+-]\d+[，,]?\s*', '', detail).strip()
                         self.sm.update_relationship(char_a, char_b_detail, delta, chapter, reason)
-            except Exception:
-                pass  # 关系变化解析失败静默跳过
+            except Exception as e:
+                logging.getLogger("pipeline").debug(f"关系变化解析跳过：{e}")
 
         # 新开伏笔
         for hook_desc in s.new_hooks:
