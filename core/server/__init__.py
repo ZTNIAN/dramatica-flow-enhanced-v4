@@ -15,7 +15,7 @@ try:
 except ImportError:
     _MISSING.append("pydantic")
 try:
-    from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+    from fastapi import FastAPI, Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse
 except ImportError:
@@ -84,45 +84,6 @@ def serve_template(filename: str):
     if filename not in allowed or not filepath.exists():
         raise HTTPException(404, "文件不存在")
     return FileResponse(str(filepath), media_type="text/markdown; charset=utf-8")
-
-# ── WebSocket 进度推送（V5 新增）─────────────────────────────────────────────
-
-class WSProgressManager:
-    """管理 WebSocket 连接，按 book_id 分组推送进度"""
-    def __init__(self):
-        self._connections: dict[str, list[WebSocket]] = {}
-
-    async def connect(self, book_id: str, ws: WebSocket):
-        await ws.accept()
-        self._connections.setdefault(book_id, []).append(ws)
-
-    def disconnect(self, book_id: str, ws: WebSocket):
-        conns = self._connections.get(book_id)
-        if conns and ws in conns:
-            conns.remove(ws)
-
-    async def broadcast(self, book_id: str, data: dict):
-        conns = self._connections.get(book_id, [])
-        dead: list[WebSocket] = []
-        for ws in conns:
-            try:
-                await ws.send_json(data)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            conns.remove(ws)
-
-ws_manager = WSProgressManager()
-
-@app.websocket("/ws/progress/{book_id}")
-async def ws_progress(websocket: WebSocket, book_id: str):
-    await ws_manager.connect(book_id, websocket)
-    try:
-        while True:
-            # 保持连接，接收心跳
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        ws_manager.disconnect(book_id, websocket)
 
 # ── 注册 Routers ──────────────────────────────────────────────────────────────
 
