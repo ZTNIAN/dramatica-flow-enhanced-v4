@@ -1,7 +1,7 @@
 # Dramatica-Flow Enhanced — 项目交接文档
 
 > 最后更新：2026-04-17
-> 版本：V4（V1/V2/V3 基础上全面架构重构）
+> 版本：V5（V4 基础上多 LLM + 选择性审查 + WebSocket + Agent 画像可视化）
 > 本文档面向所有人，尤其是零基础用户。读完就能理解整个项目、怎么用、怎么继续迭代。
 
 ---
@@ -655,19 +655,51 @@ git reset --hard origin/main
 
 ---
 
-## 九、V5 可以做什么（参考）
+## 九、V5 改动清单
 
-| 优先级 | 任务 | 说明 |
-|--------|------|------|
-| P1 | 端到端测试 | 实际跑一本书，验证审查闭环质量 |
-| P1 | 管线成本优化 | 审查Agent只在高风险章节触发，不是每章都跑 |
-| P2 | Agent能力画像可视化 | Web UI中展示各Agent评分趋势 |
-| P2 | 反馈→修订自动触发 | MiroFish报告高优先级问题自动进入下一章修订 |
-| P2 | 支持更多LLM | Claude、GPT-4等 |
-| P2 | 导出格式增强 | PDF、EPUB格式支持 |
-| P2 | WebSocket实时进度 | 写作过程实时推送到Web UI |
-| P2 | KB文件热加载 | 编辑知识库不用重启服务 |
-| P3 | LLM成本追踪 | 记录每次调用的token和费用 |
+V5 在 V4 基础上实现了 7 项优化：
+
+| # | 任务 | 状态 | 说明 |
+|---|------|------|------|
+| 1 | 多LLM后端 | ✅ 完成 | 新增 Claude + GPT-4 Provider + 自动降级链 |
+| 2 | 选择性审查 | ✅ 完成 | 4种模式：all/light/minimal/adaptive，环境变量控制 |
+| 3 | WebSocket进度 | ✅ 完成 | `/ws/progress/{book_id}` 实时推送写作各阶段状态 |
+| 4 | Agent画像可视化 | ✅ 完成 | `/api/books/{id}/agent-performance` 端点 + Web UI 趋势图 |
+| 5 | .env.example | ✅ 完成 | 补齐 Claude/GPT-4/WebSocket/review mode 环境变量 |
+| 6 | Web UI对齐 | ✅ 完成 | WebSocket客户端 + Agent画像Tab + 进度显示条 |
+| 7 | 端到端测试 | ⏳ 待做 | 需要实际部署运行验证 |
+
+### V5 新增文件/改动
+
+| 文件 | 改动 |
+|------|------|
+| `core/llm/__init__.py` | +150行：ClaudeProvider + OpenAIProvider + FallbackProvider + PROVIDER_FACTORIES |
+| `core/pipeline.py` | +30行：review_mode/adaptive配置 + _emit回调 + _should_run_review网关 |
+| `core/server/__init__.py` | +40行：WSProgressManager + /ws/progress WebSocket端点 |
+| `core/server/routers/enhanced.py` | +80行：agent-performance + review-stats 端点 |
+| `.env.example` | +30行：Claude/GPT-4/降级链/审查模式/WebSocket配置 |
+| `dramatica_flow_web_ui.html` | +100行：WebSocket客户端 + Agent画像Tab + 进度条 |
+
+### V5 审查模式说明
+
+通过 `PIPELINE_REVIEW_MODE` 环境变量控制：
+
+| 模式 | 说明 | 省钱程度 |
+|------|------|---------|
+| `all` | 每章跑全部审查Agent（默认） | 0% |
+| `light` | 只跑对话+场景审查 | ~50% |
+| `minimal` | 跳过所有专项审查，只跑审计 | ~70% |
+| `adaptive` | light基础上，每N章或低分章强制全量 | ~40% |
+
+### V5 LLM 降级链
+
+通过 `LLM_FALLBACK_CHAIN` 配置，主 Provider 失败时自动切换备用：
+
+```env
+LLM_FALLBACK_CHAIN=deepseek,claude,openai
+```
+
+支持的 Provider：deepseek / ollama / claude / openai
 
 ---
 
@@ -679,7 +711,7 @@ git reset --hard origin/main
 | 后端 | FastAPI |
 | CLI | Typer |
 | 数据存储 | 文件系统（JSON + Markdown） |
-| LLM | DeepSeek API（默认）/ Ollama（本地免费） |
+| LLM | DeepSeek API（默认）/ Ollama（本地免费）/ Claude / GPT-4 |
 | 前端 | 单文件 HTML（暗色主题） |
 | 校验 | Pydantic v2 |
 
