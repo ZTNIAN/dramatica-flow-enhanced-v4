@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -30,29 +29,23 @@ from pydantic import BaseModel, Field, field_validator
 from ..llm import LLMProvider, LLMMessage, parse_llm_json, with_retry
 
 
-# ── 知识库加载辅助 ───────────────────────────────────────────────────────────
+# ── V5: 知识库从公共模块导入（消除重复）────────────────────────────────────────
+from .kb import (
+    KB_HOOK_DESIGNER, KB_OPENING_ENDING, KB_EMOTION_CURVE,
+    KB_DIALOGUE, KB_CHAR_GROWTH, KB_STYLE_CONSISTENCY,
+    KB_SCENE_ARCHITECT, KB_PSYCHOLOGICAL,
+    track_kb_query,
+)
 
-_KB_DIR = Path(__file__).parent.parent / "knowledge_base"
-
-
-def _load_kb(name: str) -> str:
-    """从 knowledge_base 目录加载文件内容，不存在则返回空串"""
-    p = _KB_DIR / name
-    try:
-        return p.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return ""
-
-
-# Agent-specific 知识库预加载
-_KB_HOOK_DESIGNER = _load_kb("agent-specific/hook-designer-guide.md")
-_KB_OPENING_ENDING = _load_kb("agent-specific/opening-ending-guide.md")
-_KB_EMOTION_CURVE = _load_kb("agent-specific/emotion-curve-guide.md")
-_KB_DIALOGUE = _load_kb("agent-specific/dialogue-expert-guide.md")
-_KB_CHAR_GROWTH = _load_kb("agent-specific/character-growth-guide.md")
-_KB_STYLE_CONSISTENCY = _load_kb("agent-specific/style-consistency-guide.md")
-_KB_SCENE_ARCHITECT = _load_kb("agent-specific/scene-architect-guide.md")
-_KB_PSYCHOLOGICAL = _load_kb("agent-specific/psychological-portrayal-guide.md")
+# 向后兼容别名
+_KB_HOOK_DESIGNER = KB_HOOK_DESIGNER
+_KB_OPENING_ENDING = KB_OPENING_ENDING
+_KB_EMOTION_CURVE = KB_EMOTION_CURVE
+_KB_DIALOGUE = KB_DIALOGUE
+_KB_CHAR_GROWTH = KB_CHAR_GROWTH
+_KB_STYLE_CONSISTENCY = KB_STYLE_CONSISTENCY
+_KB_SCENE_ARCHITECT = KB_SCENE_ARCHITECT
+_KB_PSYCHOLOGICAL = KB_PSYCHOLOGICAL
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
