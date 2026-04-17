@@ -1,0 +1,290 @@
+{
+  "platform": "番茄小说",
+  "report_date": "2025-01",
+  "data_sources": [
+    "QuestMobile",
+    "中国社会科学院新闻与传播研究所",
+    "中国音像与数字出版协会",
+    "番茄小说官方报告",
+    "国海证券研究报告",
+    "36氪",
+    "艾瑞咨询"
+  ],
+  "reading_duration": {
+    "daily_avg_hours": {
+      "value": 3.5,
+      "unit": "小时",
+      "source": "番茄小说2024年度报告",
+      "date": "2024"
+    },
+    "daily_use_minutes": {
+      "value": 65.4,
+      "unit": "分钟",
+      "source": "QuestMobile/行业研究报告",
+      "date": "2023"
+    },
+    "monthly_per_user_hours": {
+      "value": 15.83,
+      "unit": "小时",
+      "source": "QuestMobile",
+      "date": "2023-12"
+    },
+    "peak_reading_times": [
+      {
+        "time": "12:00-14:00",
+        "label": "午间高峰"
+      },
+      {
+        "time": "22:00-23:00",
+        "label": "晚间高峰"
+      },
+      {
+        "time": "18:00-20:00",
+        "label": "通勤时段"
+      },
+      {
+        "time": "22:00-24:00",
+        "label": "深夜时段"
+      }
+    ],
+    "notes": "男性用户分时长数据暂不可得"
+  },
+  "user_scale": {
+    "mau": {
+      "value": 2.2,
+      "unit": "亿",
+      "source": "QuestMobile/媒体报道",
+      "date": "2024-Q3"
+    },
+    "dau": {
+      "value": 1.0,
+      "unit": "亿+",
+      "source": "36氪/媒体报道",
+      "date": "2024"
+    },
+    "registered_users": {
+      "value": 5.0,
+      "unit": "亿+",
+      "source": "番茄小说用户报告",
+      "date": "2023-06"
+    },
+    "publication_dau": {
+      "value": 1000,
+      "unit": "万+",
+      "source": "番茄小说官方",
+      "date": "2024年底"
+    }
+  },
+  "completion_rate": {
+    "10k_words": {
+      "value": 28.35,
+      "unit": "%",
+      "source": "国海证券研究报告"
+    },
+    "30k_words": {
+      "value": 20.84,
+      "unit": "%",
+      "source": "国海证券研究报告"
+    },
+    "50k_words": {
+      "value": 18.5,
+      "unit": "%",
+      "source": "国海证券研究报告"
+    },
+    "80k_words": {
+      "value": 15.44,
+      "unit": "%",
+      "source": "国海证券研究报告"
+    },
+    "qualified_threshold": {
+      "value": 20,
+      "unit": "%",
+      "note": "10万字完读率>20%可获全站弹窗推荐"
+    }
+  },
+  "user_demographics": {
+    "gender": {
+      "male": "略高于女性",
+      "source": "百度指数/行业研究"
+    },
+    "age_distribution": {
+      "under_24": {
+        "value": 31.4,
+        "unit": "%"
+      },
+      "26_35": {
+        "value": "近六成",
+        "note": "阅读主力"
+      },
+      "19_45": {
+        "value": 67.15,
+        "unit": "%"
+      },
+      "over_40": {
+        "value": "突破30%",
+        "date": "2025"
+      }
+    },
+    "city_distribution": {
+      "tier_3": {
+        "value": 21.93,
+        "unit": "%"
+      },
+      "tier_4": {
+        "value": 18.19,
+        "unit": "%"
+      },
+      "tier_5": {
+        "value": 11.31,
+        "unit": "%"
+      },
+      "tier_3_and_below_total": {
+        "value": "超50%",
+        "note": "下沉市场特征明显"
+      }
+    },
+    "top_provinces": [
+      "河南",
+      "广东",
+      "江苏"
+    ]
+  },
+  "male_reading_preferences": {
+    "high_preference": [
+      "玄幻",
+      "穿越",
+      "都市"
+    ],
+    "medium_preference": {
+      "悬疑": "19%",
+      "推理": "14%",
+      "现代言情": "19%",
+      "古代言情": "12%"
+    },
+    "middle_aged_male": [
+      "历史",
+      "赘婿",
+      "官场",
+      "军事",
+      "玄幻"
+    ],
+    "source": "番茄小说调研报告/百度指数"
+  },
+  "social_behavior": {
+    "annual_comments": {
+      "value": 10,
+      "unit": "亿条+",
+      "source": "番茄小说创作者大会",
+      "date": "2024"
+    },
+    "top_work_comments": {
+      "work": "《十日终焉》",
+      "value": 1000,
+      "unit": "万条+"
+    },
+    "publication_review_users": {
+      "value": 1386,
+      "unit": "万用户",
+      "source": "番茄小说官方"
+    },
+    "reward_behavior": {
+      "note": "打赏率、平均打赏金额数据暂不可得",
+      "author_income": {
+        "monthly_10k_authors": 9374,
+        "period": "过去12个月"
+      }
+    },
+    "share_rate": {
+      "note": "数据暂不可得",
+      "related_data": "2025年通过社交分享进入小程序的用户占比达41%"
+    }
+  },
+  "monetization": {
+    "annual_revenue_estimate": {
+      "value": "300-400",
+      "unit": "亿元",
+      "source": "媒体报道",
+      "note": "字节跳动否认该数据"
+    },
+    "business_model": {
+      "primary": "广告变现（70%+）",
+      "secondary": [
+        "会员服务",
+        "用户打赏",
+        "IP版权"
+      ]
+    },
+    "ad_revenue_per_1k_reads": {
+      "value": "3-8",
+      "unit": "元",
+      "note": "行业估算"
+    },
+    "payment_related": {
+      "payment_rate": "数据暂不可得（平台主打免费模式）",
+      "arppu_reference": {
+        "platform": "阅文集团",
+        "value": 32,
+        "unit": "元/月",
+        "date": "2024"
+      }
+    }
+  },
+  "content_ecosystem": {
+    "signed_authors": {
+      "value": 60,
+      "unit": "万+",
+      "date": "2024-12"
+    },
+    "exclusive_works": {
+      "value": 78,
+      "unit": "万部+",
+      "date": "2024-12"
+    },
+    "copyright_content": {
+      "value": 150,
+      "unit": "万部+",
+      "date": "2024"
+    },
+    "publisher_partnerships": {
+      "value": 400,
+      "unit": "家",
+      "date": "2025-06"
+    },
+    "ebook_collection": {
+      "value": 38,
+      "unit": "万册",
+      "date": "2025-06"
+    }
+  },
+  "data_gaps": [
+    "男性用户日均阅读时长（分性别）",
+    "单次阅读时长分布",
+    "周末vs工作日阅读时长对比",
+    "日均打开APP次数",
+    "周/月活跃天数",
+    "连续阅读天数分布",
+    "书架使用率",
+    "日均搜索次数、热门搜索词",
+    "推荐点击率",
+    "分题材完读率",
+    "跳失率",
+    "番茄小说付费率",
+    "ARPU",
+    "会员转化率",
+    "评论率（阅读后评论比例）",
+    "打赏率、平均打赏金额",
+    "分享率",
+    "书单创建率"
+  ],
+  "key_findings": [
+    "番茄小说MAU达2.2亿，DAU超1亿，为国内最大数字阅读平台",
+    "用户日均阅读时长3.5小时，月人均使用时长15.83小时",
+    "三线及以下城市用户占比超50%，下沉市场特征明显",
+    "男性用户占比略高于女性，偏好玄幻、穿越、都市题材",
+    "中老年男性偏好历史、赘婿、官场、军事类作品",
+    "10万字完读率28.35%，用户粘性较高",
+    "年度评论总数超10亿条，用户互动活跃",
+    "广告变现为核心收入来源（占比70%+）",
+    "年收入预估300-400亿元（未获官方确认）"
+  ]
+}
