@@ -91,15 +91,28 @@ def serve_template(filename: str):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=os.environ.get("CORS_ALLOW_ORIGINS", "http://localhost:8766,http://127.0.0.1:8766").split(","),
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "Authorization", "Accept"],
 )
 
 # ── 数据规范化工具 ──────────────────────────────────────────────────────────
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BOOKS_DIR = PROJECT_ROOT / "books"
+
+
+def _safe_book_dir(book_id: str) -> Path:
+    """安全解析书籍路径，防止路径遍历攻击"""
+    # 只允许字母、数字、下划线、连字符
+    import re
+    if not re.match(r'^[\w\-\u4e00-\u9fff]+$', book_id):
+        raise HTTPException(400, "无效的书籍ID（只允许字母/数字/下划线/中文）")
+    book_dir = (BOOKS_DIR / book_id).resolve()
+    # 确保解析后的路径仍在 BOOKS_DIR 下
+    if not str(book_dir).startswith(str(BOOKS_DIR.resolve())):
+        raise HTTPException(400, "无效的书籍路径")
+    return book_dir
 
 # dramatic_function 枚举值映射（兼容 AI 输出的各种写法）
 _DF_MAP = {
@@ -412,7 +425,7 @@ def get_book(book_id: str):
 
 @app.delete("/api/books/{book_id}")
 def delete_book(book_id: str):
-    book_dir = BOOKS_DIR / book_id
+    book_dir = _safe_book_dir(book_id)
     if not book_dir.exists():
         raise HTTPException(404, f"书籍不存在：{book_id}")
     shutil.rmtree(book_dir, ignore_errors=True)
@@ -3508,7 +3521,7 @@ def api_outline(book_id: str, req: OutlineRequest):
         # 读取生成的大纲数据返回
         outline_data = None
         if result.returncode == 0:
-            outline_dir = BOOKS_DIR / book_id / "outlines"
+            outline_dir = _safe_book_dir(book_id) / "outlines"
             outline_path = outline_dir / "full_outline.json"
             if outline_path.exists():
                 outline_data = json.loads(outline_path.read_text(encoding="utf-8"))
