@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import os
 import uuid
 from dataclasses import dataclass, field
 
@@ -46,6 +47,42 @@ from .validators import PostWriteValidator
 from .quality_dashboard import QualityDashboard, ChapterStats
 from .dynamic_planner import DynamicPlanner
 from .kb_incentive import KBIncentiveTracker
+
+
+@dataclass
+class PipelineConfig:
+    """管线可配置参数（优先读环境变量，否则用默认值）"""
+    max_revise_rounds: int = 3          # 最大修订轮数
+    mirofish_interval: int = 5          # MiroFish 每N章触发
+    mirofish_sample_chars: int = 3000   # MiroFish 每章采样字数
+    recent_summaries_n: int = 3         # 前情摘要取最近N章
+    dormancy_threshold: int = 5         # 支线掉线预警阈值（章）
+    review_score_floor: int = 75        # 审查Agent问题汇入阈值
+    style_score_floor: int = 80         # 风格一致性修正阈值
+    audit_tension_floor: int = 90       # 审计分低于此值调整张力曲线
+    audit_dimension_floor: int = 85     # 单项维度最低分要求
+    audit_pass_total: int = 95          # 审计通过加权总分要求
+
+    @classmethod
+    def from_env(cls) -> PipelineConfig:
+        """从环境变量读取配置，未设置则用默认值"""
+        def _int(key: str, default: int) -> int:
+            try:
+                return int(os.environ.get(key, default))
+            except (ValueError, TypeError):
+                return default
+        return cls(
+            max_revise_rounds=_int("PIPELINE_MAX_REVISE_ROUNDS", 3),
+            mirofish_interval=_int("PIPELINE_MIROFISH_INTERVAL", 5),
+            mirofish_sample_chars=_int("PIPELINE_MIROFISH_SAMPLE_CHARS", 3000),
+            recent_summaries_n=_int("PIPELINE_RECENT_SUMMARIES_N", 3),
+            dormancy_threshold=_int("PIPELINE_DORMANCY_THRESHOLD", 5),
+            review_score_floor=_int("PIPELINE_REVIEW_SCORE_FLOOR", 75),
+            style_score_floor=_int("PIPELINE_STYLE_SCORE_FLOOR", 80),
+            audit_tension_floor=_int("PIPELINE_AUDIT_TENSION_FLOOR", 90),
+            audit_dimension_floor=_int("PIPELINE_AUDIT_DIMENSION_FLOOR", 85),
+            audit_pass_total=_int("PIPELINE_AUDIT_PASS_TOTAL", 95),
+        )
 
 
 @dataclass
@@ -90,7 +127,7 @@ class WritingPipeline:
     [状态更新] 结算表 → world_state.json + current_state.md
     """
 
-    MAX_REVISE_ROUNDS = 3
+    # MAX_REVISE_ROUNDS 改由 self.config.max_revise_rounds 控制
 
     def __init__(
         self,
@@ -117,7 +154,9 @@ class WritingPipeline:
         scene_architect: SceneArchitect | None = None,
         psychological_expert: PsychologicalPortrayalExpert | None = None,
         mirofish_reader: MiroFishReader | None = None,
+        config: PipelineConfig | None = None,  # V5: 可配置参数
     ):
+        self.config = config or PipelineConfig.from_env()
         self.sm = state_manager
         self.architect = architect
         self.writer = writer
@@ -171,7 +210,7 @@ class WritingPipeline:
 
         # 前情摘要：取最近 3 章
         full_summaries = self.sm.read_truth(TruthFileKey.CHAPTER_SUMMARIES)
-        prior_summaries = _extract_recent_summaries(full_summaries, n=3)
+        prior_summaries = _extract_recent_summaries(full_summaries, n=self.config.recent_summaries_n)
 
         # ── 多线程上下文解析 ──────────────────────────────────────────────────
         ws = self.sm.read_world_state()
@@ -280,7 +319,7 @@ class WritingPipeline:
             # 场景审核问题
             if scene_audit and scene_audit.issues:
                 for si in scene_audit.issues:
-                    if si.get("score", 100) < 75:
+                    if si.get("score", 100) < self.config.review_score_floor:
                         issues.append(AuditIssue(
                             dimension="场景构建",
                             severity="warning" if si.get("score", 0) >= 60 else "critical",
@@ -291,7 +330,7 @@ class WritingPipeline:
             # 心理审核问题
             if psych_audit and psych_audit.issues:
                 for pi in psych_audit.issues:
-                    if pi.get("score", 100) < 75:
+                    if pi.get("score", 100) < self.config.review_score_floor:
                         issues.append(AuditIssue(
                             dimension="心理刻画",
                             severity="warning" if pi.get("score", 0) >= 60 else "critical",
@@ -323,7 +362,7 @@ class WritingPipeline:
                     characters=char_names,
                 )
                 log(f"  对话评分：{dialogue_review.overall_score}/100")
-                if dialogue_review.overall_score < 75:
+                if dialogue_review.overall_score < self.config.review_score_floor:
                     log(f"  ⚠ 对话质量偏低，问题将汇入修订循环")
             except Exception as e:
                 log(f"  对话审查失败（不阻塞）：{e}")
@@ -444,7 +483,7 @@ class WritingPipeline:
             log(f"  合并审查问题：+{len(review_issues)} 条（对话/场景/心理/风格）")
 
         # 修订循环
-        while not audit_report.passed and revision_rounds < self.MAX_REVISE_ROUNDS:
+        while not audit_report.passed and revision_rounds < self.config.max_revise_rounds:
             revision_rounds += 1
             total_rework += 1
             log(f"修订第 {revision_rounds} 轮（累计返工{total_rework}次，{audit_report.critical_count} critical）...")
@@ -494,7 +533,7 @@ class WritingPipeline:
                     style_check = self.style_checker.check_consistency(recent_chapters)
                     log(f"  风格一致性评分：{style_check.overall_score}/100")
                     # V4：风格不通过且还有修订余量，做最后一轮修正
-                    if style_check.overall_score < 80 and revision_rounds < self.MAX_REVISE_ROUNDS and style_check.issues:
+                    if style_check.overall_score < self.config.style_score_floor and revision_rounds < self.config.max_revise_rounds and style_check.issues:
                         style_issues = [
                             AuditIssue(
                                 dimension="风格一致",
@@ -583,7 +622,7 @@ class WritingPipeline:
         dormancy_warnings: list[str] = []
         if ws.threads:
             self.sm.update_thread_status_md()
-            dormant = ws.dormant_threads(ch, threshold=5)
+            dormant = ws.dormant_threads(ch, threshold=self.config.dormancy_threshold)
             for t in dormant:
                 gap = ch - t.last_active_chapter
                 dormancy_warnings.append(f"{t.name}（{t.id}）：已 {gap} 章未活跃")
@@ -640,8 +679,8 @@ class WritingPipeline:
                 # 检查是否需要调整战役规划
                 campaign = self.dynamic_planner.get_current_campaign(ch)
                 if campaign:
-                    if audit_report.weighted_total > 0 and audit_report.weighted_total < 90:
-                        log(f"  注意：本章加权分 {audit_report.weighted_total} < 90，"
+                    if audit_report.weighted_total > 0 and audit_report.weighted_total < self.config.audit_tension_floor:
+                        log(f"  注意：本章加权分 {audit_report.weighted_total} < {self.config.audit_tension_floor}，"
                             f"战役「{campaign.name}」已自动调整后续张力曲线")
                     if audit_report.redline_violations:
                         log(f"  ⚠ 红线触发：{audit_report.redline_violations}，后续5章张力已下调")
@@ -686,16 +725,16 @@ class WritingPipeline:
         )
 
         # ── 16. V4：MiroFish 读者测试（每 MIROFISH_INTERVAL 章触发）──────────
-        MIROFISH_INTERVAL = 5  # 每5章触发一次
+        MIROFISH_INTERVAL = self.config.mirofish_interval
         if self.mirofish_reader and self.feedback_expert and ch % MIROFISH_INTERVAL == 0:
-            log(f"MiroFish 读者测试（第 {ch} 章，每{MIROFISH_INTERVAL}章触发）...")
+            log(f"MiroFish 读者测试（第 {ch} 章，每{self.config.mirofish_interval}章触发）...")
             try:
                 # 收集最近 N 章的内容
                 test_chapters = []
                 for prev_ch in range(max(1, ch - MIROFISH_INTERVAL + 1), ch + 1):
                     c = self.sm.read_final(prev_ch) or self.sm.read_draft(prev_ch)
                     if c:
-                        test_chapters.append({"number": prev_ch, "content": c[:3000]})
+                        test_chapters.append({"number": prev_ch, "content": c[:self.config.mirofish_sample_chars]})
 
                 if test_chapters:
                     # 模拟读者测试
