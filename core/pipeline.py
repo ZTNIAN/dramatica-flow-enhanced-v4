@@ -64,6 +64,10 @@ class PipelineConfig:
     audit_tension_floor: int = 90       # 审计分低于此值调整张力曲线
     audit_dimension_floor: int = 85     # 单项维度最低分要求
     audit_pass_total: int = 95          # 审计通过加权总分要求
+    # V5: 选择性审查模式
+    review_mode: str = "all"            # all | light | minimal | adaptive
+    review_full_interval: int = 5       # adaptive 模式下每N章强制全量
+    review_force_score: int = 70        # 低于此分强制全量审查
 
     @classmethod
     def from_env(cls) -> PipelineConfig:
@@ -73,6 +77,8 @@ class PipelineConfig:
                 return int(os.environ.get(key, default))
             except (ValueError, TypeError):
                 return default
+        def _str(key: str, default: str) -> str:
+            return os.environ.get(key, default) or default
         return cls(
             max_revise_rounds=_int("PIPELINE_MAX_REVISE_ROUNDS", 3),
             mirofish_interval=_int("PIPELINE_MIROFISH_INTERVAL", 5),
@@ -84,6 +90,9 @@ class PipelineConfig:
             audit_tension_floor=_int("PIPELINE_AUDIT_TENSION_FLOOR", 90),
             audit_dimension_floor=_int("PIPELINE_AUDIT_DIMENSION_FLOOR", 85),
             audit_pass_total=_int("PIPELINE_AUDIT_PASS_TOTAL", 95),
+            review_mode=_str("PIPELINE_REVIEW_MODE", "all"),
+            review_full_interval=_int("PIPELINE_REVIEW_FULL_INTERVAL", 5),
+            review_force_score=_int("PIPELINE_REVIEW_FORCE_SCORE", 70),
         )
 
 
@@ -182,6 +191,37 @@ class WritingPipeline:
         self.scene_architect = scene_architect
         self.psychological_expert = psychological_expert
         self.mirofish_reader = mirofish_reader
+        # V5: WebSocket 进度回调
+        self._progress_callback: Callable[[dict], None] | None = None
+
+    def set_progress_callback(self, cb: Callable[[dict], None] | None):
+        """设置进度回调，用于 WebSocket 实时推送"""
+        self._progress_callback = cb
+
+    def _emit(self, step: str, detail: str = "", **extra):
+        """发射进度事件"""
+        if self._progress_callback:
+            try:
+                event = {"step": step, "detail": detail, **extra}
+                self._progress_callback(event)
+            except Exception:
+                pass  # 回调失败不影响管线
+
+    def _should_run_review(self, agent_name: str, chapter: int) -> bool:
+        """V5: 根据审查模式决定是否运行某个审查 Agent"""
+        mode = self.config.review_mode
+        if mode == "all":
+            return True
+        if mode == "minimal":
+            return False  # minimal 模式跳过所有专项审查，只跑审计
+        if mode == "light":
+            return agent_name in ("dialogue", "scene")  # light 只跑对话+场景
+        if mode == "adaptive":
+            # 每 N 章强制全量
+            if chapter % self.config.review_full_interval == 0:
+                return True
+            return agent_name in ("dialogue", "scene")
+        return True
 
     def run(
         self,
@@ -251,6 +291,7 @@ class WritingPipeline:
 
         # ── 1. 建筑师规划 ─────────────────────────────────────────────────────
         log("建筑师规划...")
+        self._emit("architect", f"规划第{ch}章蓝图")
         blueprint = self.architect.plan_chapter(
             chapter_outline=chapter_outline,
             world_context=world_context,
@@ -266,6 +307,7 @@ class WritingPipeline:
 
         # ── 2. 写手写章 ───────────────────────────────────────────────────────
         log("写手写章...")
+        self._emit("writer", f"撰写第{ch}章正文")
         scene_summaries = _format_beats(chapter_outline)
         writer_output = self.writer.write_chapter(
             scene_summaries=scene_summaries,
@@ -353,9 +395,10 @@ class WritingPipeline:
 
             return issues
 
-        # ── 2.5 对话专家审查 ─────────────────────────────────────────────────
-        if self.dialogue_expert:
+        # ── 2.5 对话专家审查（V5: 选择性触发）─────────────────────────────────
+        if self.dialogue_expert and self._should_run_review("dialogue", ch):
             log("对话专家审查...")
+            self._emit("review_dialogue", f"审查第{ch}章对话")
             try:
                 char_names = [c.name for c in self.all_characters]
                 dialogue_review = self.dialogue_expert.review_dialogue(
@@ -422,9 +465,10 @@ class WritingPipeline:
             else:
                 log("  巡查通过")
 
-        # ── 3.7 场景审核 + 心理审核（审查结果汇入修订循环）──────────────────────
-        if self.scene_architect:
+        # ── 3.7 场景审核 + 心理审核（V5: 选择性触发）───────────────────────────
+        if self.scene_architect and self._should_run_review("scene", ch):
             log("场景审核...")
+            self._emit("review_scene", f"审查第{ch}章场景")
             try:
                 scene_audit = self.scene_architect.audit_scene(
                     chapter_content=current_content,
@@ -436,8 +480,9 @@ class WritingPipeline:
                 if not isinstance(e, (json.JSONDecodeError, KeyError, ValueError)):
                     log(f"  详细错误：{traceback.format_exc()[-500:]}")
 
-        if self.psychological_expert:
+        if self.psychological_expert and self._should_run_review("psychology", ch):
             log("心理审核...")
+            self._emit("review_psychology", f"审查第{ch}章心理描写")
             try:
                 char_names = [c.name for c in self.all_characters]
                 psych_audit = self.psychological_expert.audit_psychology(
@@ -453,6 +498,7 @@ class WritingPipeline:
 
         # ── 4. 审计 → 修订闭环（合并所有审查 Agent 的问题）────────────────────
         log("审计员审计...")
+        self._emit("audit", f"9维度审计第{ch}章")
         audit_truth_ctx = self.sm.read_truth_bundle([
             TruthFileKey.CURRENT_STATE,
             TruthFileKey.CHARACTER_MATRIX,
@@ -527,8 +573,8 @@ class WritingPipeline:
                     redline_violations=audit_report.redline_violations,
                 )
 
-        # ── 4.5 风格一致性检查（修订后最终检查，不通过则最后一轮修正）────────────
-        if self.style_checker:
+        # ── 4.5 风格一致性检查（V5: 选择性触发）────────────────────────────────
+        if self.style_checker and self._should_run_review("style", ch):
             log("风格一致性检查...")
             try:
                 recent_chapters = []
@@ -566,9 +612,11 @@ class WritingPipeline:
         # ── 5. 保存最终稿 ─────────────────────────────────────────────────────
         self.sm.save_final(ch, current_content)
         log(f"最终稿保存（{len(current_content)} 字）")
+        self._emit("save_final", f"第{ch}章保存", words=len(current_content))
 
         # ── 6. 因果链提取 ─────────────────────────────────────────────────────
         log("提取因果链...")
+        self._emit("causal_chain", f"提取第{ch}章因果链")
         causal_schemas = self.engine.extract_causal_links(
             chapter_content=current_content,
             chapter_number=ch,
@@ -593,6 +641,7 @@ class WritingPipeline:
 
         # ── 7. 生成章节摘要 ───────────────────────────────────────────────────
         log("生成章节摘要...")
+        self._emit("summary", f"生成第{ch}章摘要")
         try:
             summary = self.summary_agent.generate_summary(
                 chapter_content=current_content,
