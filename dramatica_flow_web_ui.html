@@ -363,6 +363,30 @@ async function api(endpoint, opts) {
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+// ── WebSocket 进度推送（V5 新增）───────────────────────────────────────────
+let wsConn = null;
+function wsConnect(bookId) {
+  if (wsConn) { try { wsConn.close(); } catch(e){} }
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  wsConn = new WebSocket(`${proto}//${location.host}/ws/progress/${bookId}`);
+  wsConn.onmessage = function(evt) {
+    try { wsUpdateProgress(JSON.parse(evt.data)); } catch(e) {}
+  };
+  wsConn.onclose = function() { wsConn = null; };
+  setInterval(() => { if (wsConn && wsConn.readyState === 1) wsConn.send('ping'); }, 30000);
+}
+function wsUpdateProgress(data) {
+  const el = document.getElementById('ws-progress');
+  if (!el) return;
+  const stepNames = {architect:'📐 建筑师规划',writer:'✍️ 写手撰写',save_final:'💾 保存终稿',
+    causal_chain:'🔗 因果链',summary:'📋 摘要',audit:'🔍 审计',review_dialogue:'💬 对话审查',
+    review_scene:'🎬 场景审查',review_psychology:'🧠 心理审查'};
+  const label = stepNames[data.step] || data.step;
+  el.style.display = 'block';
+  el.innerHTML = `<b>${esc(label)}</b> <span>${esc(data.detail||'')}</span>` +
+    (data.words ? ` <span style="color:#6f6">${data.words}字</span>` : '');
+}
+
 const STYLES = {
   'hot-blood': '热血升级', 'cultivation': '仙侠修真', 'urban-business': '都市商战',
   'urban-romance': '都市言情', 'mystery': '悬疑推理', 'scifi': '科幻未来',
@@ -2184,6 +2208,7 @@ function loadStep5() {
               <button class="btn btn-sm" style="flex:1;border-color:var(--orange);color:var(--orange)" onclick="runMiroFishTest()">&#128032; MiroFish 测试</button>
             </div>
             <textarea id="qw-style-override" class="form-input" rows="2" placeholder="本次写作风格（可选，留空不改）。修改后会更新书籍默认风格" style="margin-top:10px"></textarea>
+            <div id="ws-progress" style="display:none;margin-top:10px;padding:8px 12px;background:var(--bg2);border-radius:6px;font-size:12px;border-left:3px solid var(--blue)"></div>
             <div id="write-log" style="margin-top:10px"></div>
           </div>
           <!-- 续写 & 导入 -->
@@ -2431,6 +2456,8 @@ async function doWrite(count) {
   const log = document.getElementById('write-log');
   if (log) log.innerHTML = '<div class="loading" style="padding:12px">正在写作，请耐心等待（每章约 1-3 分钟）...</div>';
   toast('正在使用管线写作...', 'loading');
+  // V5: 连接 WebSocket 进度
+  wsConnect(currentBook.id);
   // 如果填了风格，先保存到书籍配置
   const styleVal = document.getElementById('qw-style-override')?.value?.trim();
   if (styleVal) {
@@ -2611,6 +2638,7 @@ function loadStep6() {
             <div class="mode-tab" id="tab-style" onclick="switchAuditTab('style',this)" style="color:var(--blue)">&#128221; 风格一致性</div>
             <div class="mode-tab" id="tab-dashboard" onclick="switchAuditTab('dashboard',this)" style="color:var(--purple)">&#128200; 仪表盘</div>
             <div class="mode-tab" id="tab-kb" onclick="switchAuditTab('kb',this)" style="color:var(--orange)">&#128218; KB统计</div>
+            <div class="mode-tab" id="tab-agents" onclick="switchAuditTab('agents',this)" style="color:var(--teal,#00b894)">&#128202; Agent画像</div>
           </div>
         </div>
         <!-- 故事数据面板 -->
@@ -2635,6 +2663,11 @@ function loadStep6() {
         <div class="card" id="kb-panel" style="display:none">
           <div class="card-header" style="color:var(--orange)">&#128218; 知识库查询统计 <button class="btn btn-sm" style="margin-left:auto" onclick="loadKBStats()">&#128260; 刷新</button></div>
           <div id="kb-content"><div class="loading">点击刷新加载</div></div>
+        </div>
+        <!-- V5: Agent 能力画像面板 -->
+        <div class="card" id="agents-panel" style="display:none">
+          <div class="card-header" style="color:#00b894">&#128202; Agent 能力画像 <button class="btn btn-sm" style="margin-left:auto" onclick="loadAgentPerformance()">&#128260; 刷新</button></div>
+          <div id="agents-content"><div class="loading">点击刷新加载</div></div>
         </div>
         <!-- V4: 情绪曲线面板 -->
         <div class="card" id="emotion-panel" style="display:none">
@@ -2672,10 +2705,12 @@ function switchAuditTab(tab, el) {
   document.getElementById('kb-panel').style.display = tab === 'kb' ? '' : 'none';
   document.getElementById('emotion-panel').style.display = tab === 'emotion' ? '' : 'none';
   document.getElementById('style-panel').style.display = tab === 'style' ? '' : 'none';
+  document.getElementById('agents-panel').style.display = tab === 'agents' ? '' : 'none';
   if (tab === 'story') loadStoryData();
   if (tab === 'edit') loadAuditChapterText();
   if (tab === 'dashboard') loadQualityDashboard();
   if (tab === 'kb') loadKBStats();
+  if (tab === 'agents') loadAgentPerformance();
 }
 
 // ── V5: 质量仪表盘 ───────────────────────────────────────────────────────
@@ -2779,6 +2814,64 @@ async function loadKBStats() {
             <div style="width:35px;font-size:12px;font-weight:600;color:var(--purple);text-align:right">${count}</div>
           </div>`).join('')}
       </div>`;
+  } catch (e) { panel.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}</div>`; }
+}
+
+// ── V5: Agent 能力画像 ─────────────────────────────────────────────────────
+
+async function loadAgentPerformance() {
+  if (!currentBook) return;
+  const panel = document.getElementById('agents-content');
+  panel.innerHTML = '<div class="loading">加载中...</div>';
+  try {
+    const data = await api(`/books/${currentBook.id}/agent-performance`);
+    const summary = data.summary || {};
+    const agents = data.agents || {};
+    const keys = Object.keys(summary);
+    if (!keys.length) {
+      panel.innerHTML = '<div class="empty">暂无Agent画像数据，写完章节后自动记录</div>';
+      return;
+    }
+    const agentNames = {
+      dialogue_expert: '💬 对话专家', scene_architect: '🎬 场景架构',
+      psychological_expert: '🧠 心理分析', style_consistency: '🎨 风格一致性',
+    };
+    const trendIcons = { up: '📈', down: '📉', stable: '➡️' };
+    const trendColors = { up: 'var(--green)', down: 'var(--red)', stable: 'var(--text3)' };
+    // 汇总卡片
+    let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:16px">';
+    for (const [name, s] of Object.entries(summary)) {
+      const label = agentNames[name] || name;
+      const trend = s.trend || 'stable';
+      const color = s.latest >= 80 ? 'var(--green)' : s.latest >= 60 ? 'var(--yellow)' : 'var(--red)';
+      html += `<div class="card" style="text-align:center;padding:14px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">${label}</div>
+        <div style="font-size:28px;font-weight:700;color:${color}">${s.latest ?? '-'}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">
+          均值 ${s.average ?? '-'} | ${trendIcons[trend]} ${trend === 'up' ? '上升' : trend === 'down' ? '下降' : '稳定'}
+        </div>
+        <div style="font-size:10px;color:var(--text3);margin-top:2px">
+          最高 ${s.max ?? '-'} / 最低 ${s.min ?? '-'} · ${s.count}次审查
+        </div>
+      </div>`;
+    }
+    html += '</div>';
+    // 简易趋势条形图
+    html += '<div class="card"><div class="card-header">&#128200; 评分趋势</div>';
+    for (const [name, points] of Object.entries(agents)) {
+      const label = agentNames[name] || name;
+      html += `<div style="margin-bottom:12px"><div style="font-size:12px;font-weight:500;margin-bottom:4px">${label}</div>`;
+      html += '<div style="display:flex;align-items:flex-end;gap:2px;height:40px">';
+      const maxP = 100;
+      for (const p of points) {
+        const h = Math.max(2, (p.score / maxP) * 36);
+        const bg = p.score >= 80 ? 'var(--green)' : p.score >= 60 ? 'var(--yellow)' : 'var(--red)';
+        html += `<div style="width:${Math.max(4, Math.min(20, 300/points.length))}px;height:${h}px;background:${bg};border-radius:2px" title="Ch.${p.chapter}: ${p.score}"></div>`;
+      }
+      html += '</div></div>';
+    }
+    html += '</div>';
+    panel.innerHTML = html;
   } catch (e) { panel.innerHTML = `<div class="empty">加载失败: ${esc(e.message)}</div>`; }
 }
 
