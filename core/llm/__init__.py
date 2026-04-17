@@ -484,31 +484,222 @@ def with_retry(
     raise last_error
 
 
+# ── Anthropic Claude Provider（V5 新增） ──────────────────────────────────────
+
+class ClaudeProvider(LLMProvider):
+    """
+    Anthropic Claude 通过官方 SDK 接入。
+    """
+
+    def __init__(self, config: LLMConfig | None = None):
+        try:
+            import anthropic  # type: ignore
+        except ImportError:
+            raise LLMError("请先安装 anthropic: pip install anthropic")
+
+        if config is None:
+            config = LLMConfig(
+                api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+                base_url="https://api.anthropic.com",
+                model=os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514"),
+                temperature=float(os.environ.get("DEFAULT_TEMPERATURE", "0.7")),
+            )
+        self.config = config
+        self.client = anthropic.Anthropic(api_key=config.api_key)
+
+    def complete(self, messages: list[LLMMessage]) -> LLMResponse:
+        # 分离 system message
+        system_text = ""
+        chat_messages = []
+        for m in messages:
+            if m.role == "system":
+                system_text = m.content
+            else:
+                chat_messages.append({"role": m.role, "content": m.content})
+
+        kwargs = dict(
+            model=self.config.model,
+            max_tokens=self.config.max_tokens if self.config.max_tokens > 0 else 8192,
+            temperature=self.config.temperature,
+            messages=chat_messages,
+        )
+        if system_text:
+            kwargs["system"] = system_text
+
+        response = self.client.messages.create(**kwargs)
+        content = response.content[0].text if response.content else ""
+        return LLMResponse(
+            content=content,
+            input_tokens=response.usage.input_tokens if response.usage else 0,
+            output_tokens=response.usage.output_tokens if response.usage else 0,
+        )
+
+    def stream(self, messages: list[LLMMessage], on_chunk: Callable[[str], None]) -> LLMResponse:
+        system_text = ""
+        chat_messages = []
+        for m in messages:
+            if m.role == "system":
+                system_text = m.content
+            else:
+                chat_messages.append({"role": m.role, "content": m.content})
+
+        kwargs = dict(
+            model=self.config.model,
+            max_tokens=self.config.max_tokens if self.config.max_tokens > 0 else 8192,
+            temperature=self.config.temperature,
+            messages=chat_messages,
+            stream=True,
+        )
+        if system_text:
+            kwargs["system"] = system_text
+
+        full_content = ""
+        with self.client.messages.stream(**kwargs) as stream:
+            for text in stream.text_stream:
+                full_content += text
+                on_chunk(text)
+        return LLMResponse(content=full_content)
+
+
+# ── OpenAI GPT-4 Provider（V5 新增） ──────────────────────────────────────────
+
+class OpenAIProvider(LLMProvider):
+    """
+    OpenAI GPT-4 通过官方 SDK 接入。
+    """
+
+    def __init__(self, config: LLMConfig | None = None):
+        try:
+            from openai import OpenAI  # type: ignore
+        except ImportError:
+            raise LLMError("请先安装 openai: pip install openai")
+
+        if config is None:
+            config = LLMConfig(
+                api_key=os.environ.get("OPENAI_API_KEY", ""),
+                base_url="https://api.openai.com/v1",
+                model=os.environ.get("OPENAI_MODEL", "gpt-4o"),
+                temperature=float(os.environ.get("DEFAULT_TEMPERATURE", "0.7")),
+            )
+        self.config = config
+        self.client = OpenAI(api_key=config.api_key, base_url=config.base_url)
+
+    def _build_kwargs(self, stream: bool = False) -> dict:
+        kwargs = dict(model=self.config.model, temperature=self.config.temperature, stream=stream)
+        if self.config.max_tokens > 0:
+            kwargs["max_tokens"] = self.config.max_tokens
+        return kwargs
+
+    def complete(self, messages: list[LLMMessage]) -> LLMResponse:
+        response = self.client.chat.completions.create(
+            messages=[m.to_dict() for m in messages], **self._build_kwargs(stream=False))
+        content = response.choices[0].message.content or ""
+        usage = response.usage
+        return LLMResponse(
+            content=content,
+            input_tokens=usage.prompt_tokens if usage else 0,
+            output_tokens=usage.completion_tokens if usage else 0,
+        )
+
+    def stream(self, messages: list[LLMMessage], on_chunk: Callable[[str], None]) -> LLMResponse:
+        full_content = ""
+        stream = self.client.chat.completions.create(
+            messages=[m.to_dict() for m in messages], **self._build_kwargs(stream=True))
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content or ""
+            if delta:
+                full_content += delta
+                on_chunk(delta)
+        return LLMResponse(content=full_content)
+
+
+# ── 带降级的 Provider（V5 新增） ───────────────────────────────────────────────
+
+class FallbackProvider(LLMProvider):
+    """
+    主 Provider 失败时自动切换到备用。
+    支持从 LLM_FALLBACK_CHAIN 环境变量配置。
+    """
+
+    def __init__(self, providers: list[tuple[str, LLMProvider]]):
+        if not providers:
+            raise LLMError("至少需要一个 Provider")
+        self.providers = providers
+
+    def complete(self, messages: list[LLMMessage]) -> LLMResponse:
+        last_err: Exception | None = None
+        for name, provider in self.providers:
+            try:
+                return provider.complete(messages)
+            except Exception as e:
+                last_err = e
+                logger.warning(f"[Fallback] {name} 失败: {type(e).__name__}: {str(e)[:100]}，尝试下一个...")
+        raise LLMError(f"所有 Provider 失败，最后错误: {last_err}")
+
+    def stream(self, messages: list[LLMMessage], on_chunk: Callable[[str], None]) -> LLMResponse:
+        last_err: Exception | None = None
+        for name, provider in self.providers:
+            try:
+                return provider.stream(messages, on_chunk)
+            except Exception as e:
+                last_err = e
+                logger.warning(f"[Fallback] {name} stream 失败: {type(e).__name__}，尝试下一个...")
+        raise LLMError(f"所有 Provider 失败（stream），最后错误: {last_err}")
+
+
 # ── Provider 工厂 ─────────────────────────────────────────────────────────────
+
+_PROVIDER_FACTORIES: dict[str, Callable[..., LLMProvider]] = {
+    "deepseek": lambda cfg=None: DeepSeekProvider(cfg) if cfg else DeepSeekProvider(
+        LLMConfig(
+            api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
+            base_url=os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
+            model=os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"),
+            temperature=float(os.environ.get("DEFAULT_TEMPERATURE", "0.7")),
+        )
+    ),
+    "ollama": lambda cfg=None: OllamaProvider(cfg),
+    "claude": lambda cfg=None: ClaudeProvider(cfg),
+    "openai": lambda cfg=None: OpenAIProvider(cfg),
+}
+
 
 def create_provider(config: LLMConfig | None = None, provider_type: str | None = None) -> LLMProvider:
     """
     从环境变量或显式配置创建 Provider。
-    默认读取 .env 中的 DEEPSEEK_* 配置。
-    
+    支持降级链：当主 Provider 失败时自动切换备用。
+
     Args:
         config: 显式配置，如未提供则从环境变量读取
-        provider_type: "deepseek" 或 "ollama"，如未指定则从 LLM_PROVIDER 环境变量读取
+        provider_type: "deepseek" | "ollama" | "claude" | "openai"，
+                       如未指定则从 LLM_PROVIDER 环境变量读取
     """
     if provider_type is None:
         provider_type = os.environ.get("LLM_PROVIDER", "deepseek").lower()
-    
-    if provider_type == "ollama":
-        if config is None:
-            return OllamaProvider()
-        return OllamaProvider(config)
-    
-    # 默认使用 DeepSeek
-    if config is None:
-        config = LLMConfig(
-            api_key  = os.environ.get("DEEPSEEK_API_KEY", ""),
-            base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
-            model    = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"),
-            temperature = float(os.environ.get("DEFAULT_TEMPERATURE", "0.7")),
-        )
-    return DeepSeekProvider(config)
+
+    factory = _PROVIDER_FACTORIES.get(provider_type)
+    if factory is None:
+        raise LLMError(f"未知的 Provider: {provider_type}（支持: {', '.join(_PROVIDER_FACTORIES.keys())}）")
+
+    primary = factory(config)
+
+    # 检查是否配置了降级链
+    fallback_chain = os.environ.get("LLM_FALLBACK_CHAIN", "").strip()
+    if not fallback_chain:
+        return primary
+
+    # 构建降级链
+    providers: list[tuple[str, LLMProvider]] = [(provider_type, primary)]
+    for fb_name in fallback_chain.split(","):
+        fb_name = fb_name.strip().lower()
+        if fb_name and fb_name != provider_type:
+            fb_factory = _PROVIDER_FACTORIES.get(fb_name)
+            if fb_factory:
+                try:
+                    providers.append((fb_name, fb_factory()))
+                except Exception as e:
+                    logger.warning(f"[Fallback] 无法初始化 {fb_name}: {e}")
+
+    if len(providers) == 1:
+        return primary
+    return FallbackProvider(providers)
