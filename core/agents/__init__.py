@@ -13,7 +13,6 @@ from __future__ import annotations
 import dataclasses
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, field_validator, Field
@@ -37,43 +36,26 @@ from .enhanced_agents import (
 )
 
 
-# ── 知识库加载辅助 ───────────────────────────────────────────────────────────
+# ── V5: 知识库从公共模块导入（消除重复）────────────────────────────────────────
+from .kb import (
+    KB_ANTI_AI, KB_BEFORE_AFTER, KB_WRITING_TECHNIQUES,
+    KB_COMMON_MISTAKES, KB_FIVE_SENSES, KB_SHOW_DONT_TELL,
+    KB_WRITER_SKILLS, KB_REVIEWER_CHECKLIST, KB_REVIEW_CRITERIA_95, KB_REDLINES,
+    track_kb_query, get_kb_queries,
+)
 
-_KB_DIR = Path(__file__).parent.parent / "knowledge_base"
-
-def _load_kb(name: str) -> str:
-    """从 knowledge_base 目录加载文件内容，不存在则返回空串"""
-    p = _KB_DIR / name
-    try:
-        return p.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return ""
-
-# 预加载常用知识库内容（模块级，避免重复 IO）
-_KB_ANTI_AI = _load_kb("anti_ai_rules.md")
-_KB_BEFORE_AFTER = _load_kb("before_after_examples.md")
-_KB_WRITING_TECHNIQUES = _load_kb("writing_techniques.md")
-# V3 新增：OpenMOSS 全量知识库
-_KB_COMMON_MISTAKES = _load_kb("rules/common-mistakes.md")
-_KB_FIVE_SENSES = _load_kb("references/writing-techniques/five-senses-description.md")
-_KB_SHOW_DONT_TELL = _load_kb("references/writing-techniques/show-dont-tell.md")
-_KB_WRITER_SKILLS = _load_kb("agent-specific/writer-skills.md")
-_KB_REVIEWER_CHECKLIST = _load_kb("agent-specific/reviewer-checklist.md")
-_KB_REVIEW_CRITERIA_95 = _load_kb("rules/review-criteria-95.md")
-_KB_REDLINES = _load_kb("rules/redlines.md")
-
-# V4 新增：知识库查询追踪（供管线记录）
-_KB_QUERIES: list[tuple[str, str, str]] = []  # (agent_role, file_name, context)
-
-def _track_kb_query(agent_role: str, file_name: str, context: str = ""):
-    """记录一次知识库查询（供 KBIncentiveTracker 使用）"""
-    _KB_QUERIES.append((agent_role, file_name, context))
-
-def get_kb_queries() -> list[tuple[str, str, str]]:
-    """获取自上次清空以来的所有知识库查询记录"""
-    queries = list(_KB_QUERIES)
-    _KB_QUERIES.clear()
-    return queries
+# 向后兼容别名（避免改Agent内部引用）
+_KB_ANTI_AI = KB_ANTI_AI
+_KB_BEFORE_AFTER = KB_BEFORE_AFTER
+_KB_WRITING_TECHNIQUES = KB_WRITING_TECHNIQUES
+_KB_COMMON_MISTAKES = KB_COMMON_MISTAKES
+_KB_FIVE_SENSES = KB_FIVE_SENSES
+_KB_SHOW_DONT_TELL = KB_SHOW_DONT_TELL
+_KB_WRITER_SKILLS = KB_WRITER_SKILLS
+_KB_REVIEWER_CHECKLIST = KB_REVIEWER_CHECKLIST
+_KB_REVIEW_CRITERIA_95 = KB_REVIEW_CRITERIA_95
+_KB_REDLINES = KB_REDLINES
+_track_kb_query = track_kb_query
 
 
 # ─────────────────────────────────────────────────────────────────────────────
